@@ -9,6 +9,7 @@ local util = require("rex_sessions.util")
 local layout = require("rex_sessions.layout")
 local client = require("rex_sessions.client")
 local pins = require("rex_sessions.pins")
+local remote = require("rex_sessions.remote")
 local block_cwd = require("rex_sessions.terminal_dir").block_cwd
 
 local check = util.check
@@ -107,6 +108,16 @@ end
 
 local function ordered_pins()
 	return pins.ordered(list_sessions())
+end
+
+-- The pins of the session's server, as ordered_pins. Key actions run on
+-- the app's own server, whose pins file isn't the one for a session on
+-- another server, so ask that server's config.
+local function session_pins(ctx)
+	if not ctx.server then
+		return ordered_pins()
+	end
+	return remote.invoke(ctx.server, ctx.session_id, "list_pins").pins or {}
 end
 
 -- A session on any server: { server = host label, or nil for the app's
@@ -352,16 +363,16 @@ local function define_actions()
 	})
 
 	-- Go to the Nth pin, in the order the picker shows them. Already there,
-	-- it stays put, or with `toggle` returns to the last session. Pins are
-	-- this server's, and the session is looked up on the current session's
-	-- server, as with toggle_session.
+	-- it stays put, or with `toggle` returns to the last session. Pins and
+	-- their sessions are the current session's server's, so in a session
+	-- on another server the keys follow that server's pins.
 	rex.action({
 		name = "goto_pin",
 		title = "Go to pinned session by number",
 		category = "Sessions",
 		args = { index = "integer", toggle = "boolean?" },
 		run = function(ctx, args)
-			local pin = ordered_pins()[args.index] or error("no pin " .. args.index, 0)
+			local pin = session_pins(ctx)[args.index] or error("no pin " .. args.index, 0)
 			if args.toggle then
 				return toggle_session(ctx, pin.label, pin.dir or "")
 			end

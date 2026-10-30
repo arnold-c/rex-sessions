@@ -126,9 +126,14 @@ The picker lists the servers from your Rex hosts (`rex hosts`).
   [Multiple machines](#multiple-machines)), with `python3` and `fzf`.
   Keys run on your own machine's server, which passes its path for the
   picker, but the picker starts on the session's server.
+- To use the pin keys while you're in a session on another server, set
+  this package up in that server's config too. The keys go to that
+  server's pins, which a hidden terminal there reads with
+  `rex do list_pins`.
 
 Pins are stored on the server whose sessions they are
-(`$XDG_STATE_HOME/rex/pins`), so every picker shows the same ones.
+(`$XDG_STATE_HOME/rex/pins`), so every picker shows the same ones, and
+the pin keys follow the pins of the session you're in.
 
 ## Actions
 
