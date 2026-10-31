@@ -29,7 +29,7 @@ from REX_PICKER_CLIENT_ID (see servers.lua).
 Pins live on the server whose sessions they are (see the pin actions in
 lua/rex_sessions/init.lua), so every picker shows the same ones.
 
-Needs fzf. Uses zoxide (alt-z) and sesh (directory previews) when
+Needs fzf. Uses zoxide (alt-z) and bat (README previews, else cat) when
 installed. Standard library only, and Python 3.9 compatible for macOS's
 /usr/bin/python3.
 """
@@ -51,7 +51,8 @@ SELF = f"{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))}"
 HOME = str(Path.home())
 DEVNULL = subprocess.DEVNULL
 HAS_ZOXIDE = shutil.which("zoxide") is not None
-HAS_SESH = shutil.which("sesh") is not None
+BAT = shutil.which("bat") or shutil.which("batcat")  # batcat on Debian
+SHOW_FILE = [BAT, "--color=always", "--style=plain", "--paging=never"] if BAT else ["cat"]
 
 
 def env(name: str) -> str:
@@ -280,9 +281,24 @@ def preview(server: str, kind: str, label: str, dir: str, id: str) -> None:
     elif not dir:
         print(f"{label} has no session or directory. alt-p unpins it.")
     elif not server:
-        subprocess.run(["sesh", "preview", dir] if HAS_SESH else ["ls", "-la", dir])
+        preview_dir(dir)
     else:
         print(f"New session in {dir} on {server}")
+
+
+def preview_dir(dir: str) -> None:
+    """DIR's README (see SHOW_FILE), or its listing if it has none."""
+    found = readme(dir)
+    subprocess.run([*SHOW_FILE, str(found)] if found else ["ls", "-la", dir])
+
+
+def readme(dir: str) -> Path | None:
+    """DIR's README file, preferring a bare README, then README.md, etc."""
+    try:
+        files = sorted(p for p in Path(dir).iterdir() if p.is_file())
+    except OSError:
+        return None
+    return next((p for p in files if p.name.lower().startswith("readme")), None)
 
 
 # Picker -----------------------------------------------------------------------

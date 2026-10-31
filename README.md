@@ -15,8 +15,8 @@ A session picker for [Rex](https://www.superlogical.com/rex), like
 - Rex, with **Remote Control** turned on in the app's settings so the
   picker can switch the app's session
 - `python3` (3.9+) and `fzf` on each server
-- optional: `zoxide` (`alt-z` lists any directory it knows) and `sesh`
-  (directory previews)
+- optional: `zoxide` (`alt-z` lists any directory it knows) and `bat`
+  (highlights a directory's README in its preview; `cat` otherwise)
 
 ## Install
 
