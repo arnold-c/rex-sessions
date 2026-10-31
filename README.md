@@ -1,5 +1,7 @@
 # rex-sessions
 
+[<img src="https://img.youtube.com/vi/UBz-uPcOO8s/hqdefault.jpg"/>](https://www.youtube.com/embed/UBz-uPcOO8s)
+
 A session picker for [Rex](https://www.superlogical.com/rex), like
 [sesh](https://github.com/joshmedeski/sesh) for tmux:
 
