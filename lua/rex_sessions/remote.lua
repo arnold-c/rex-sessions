@@ -12,8 +12,11 @@ local check = util.check
 
 local M = {}
 
--- Printed with the script's exit status once its output is on screen.
--- Letters and underscores only, so it's also a plain Lua pattern.
+-- Printed before the script's output, and after it with its exit status.
+-- Anything the terminal shows first, such as macOS's "Last login" line,
+-- comes before BEGIN. Letters and underscores only, so they're also
+-- plain Lua patterns.
+local BEGIN = "rex_sessions_begin"
 local DONE = "rex_sessions_done"
 
 -- Seconds to wait for the result. Rex stops a config action after 30.
@@ -23,14 +26,19 @@ local TIMEOUT = 10
 -- `rex` first on a terminal's PATH. The output is printed as hex, as the
 -- screen wraps and trims lines. The sleep keeps it on screen until it's
 -- read, and closes the block if the key action never does.
-local SCRIPT = [[
+local SCRIPT = string.format(
+	[[
 out=$(rex do -e "$1" 2>&1)
 code=$?
-printf '%s' "$out" | od -An -v -tx1 | tr -d ' \n'
+echo %s
+printf '%%s' "$out" | od -An -v -tx1 | tr -d ' \n'
 echo
-echo "]] .. DONE .. [[ $code"
+echo "%s $code"
 sleep 60
-]]
+]],
+	BEGIN,
+	DONE
+)
 
 local function screen_text(api, session_id, block_id)
 	local screen = check(api.call("block.method", {
@@ -50,7 +58,7 @@ end
 
 -- The script's output and exit status, or nil until DONE is on screen.
 local function finished(text)
-	local hex, status = text:match("^(.-)" .. DONE .. " (%d+)")
+	local hex, status = text:match(BEGIN .. "(.-)" .. DONE .. " (%d+)")
 	if status then
 		return from_hex(hex), tonumber(status)
 	end
