@@ -110,14 +110,24 @@ local function ordered_pins()
 	return pins.ordered(list_sessions())
 end
 
--- The pins of the session's server, as ordered_pins. Key actions run on
--- the app's own server, whose pins file isn't the one for a session on
--- another server, so ask that server's config.
-local function session_pins(ctx)
+-- Run on another server by session_pin: its Nth pin from list_pins,
+-- with only what goto_pin needs, so the output stays short.
+local REMOTE_PIN = [[
+local listed = assert(rex.invoke("list_pins"))
+local pin = (listed.pins or {})[%d]
+if pin then
+	return { label = pin.label, dir = pin.dir }
+end
+]]
+
+-- The session's server's Nth pin, as in ordered_pins, or nil. Key
+-- actions run on the app's own server, whose pins file isn't the one for
+-- a session on another server, so ask that server's config.
+local function session_pin(ctx, index)
 	if not ctx.server then
-		return ordered_pins()
+		return ordered_pins()[index]
 	end
-	return remote.invoke(ctx.server, ctx.session_id, "list_pins").pins or {}
+	return remote.eval(ctx.server, ctx.session_id, REMOTE_PIN:format(index))
 end
 
 -- A session on any server: { server = host label, or nil for the app's
@@ -372,7 +382,7 @@ local function define_actions()
 		category = "Sessions",
 		args = { index = "integer", toggle = "boolean?" },
 		run = function(ctx, args)
-			local pin = session_pins(ctx)[args.index] or error("no pin " .. args.index, 0)
+			local pin = session_pin(ctx, args.index) or error("no pin " .. args.index, 0)
 			if args.toggle then
 				return toggle_session(ctx, pin.label, pin.dir or "")
 			end
