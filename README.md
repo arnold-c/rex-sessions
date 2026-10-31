@@ -16,7 +16,8 @@ A session picker for [Rex](https://www.superlogical.com/rex), like
   picker can switch the app's session
 - `python3` (3.9+) and `fzf` on each server
 - optional: `zoxide` (`alt-z` lists any directory it knows) and `bat`
-  (highlights a directory's README in its preview; `cat` otherwise)
+  (highlights a directory's README in its preview; see `preview` in
+  [Options](#options))
 
 ## Install
 
@@ -98,10 +99,28 @@ require("rex_sessions").setup({
 	-- The shell that starts the picker, interactively so fzf and python3
 	-- are on its PATH. Defaults to $SHELL.
 	shell = nil,
+	-- Commands that preview a directory with no session yet: the first
+	-- whose program is installed on the picker's server. `{readme}` is the
+	-- directory's README (the command is skipped when there's none) and
+	-- `{dir}` the directory, added at the end if neither appears. Falls
+	-- back to `ls -la`.
+	preview = {
+		"bat --color=always --style=plain --paging=never {readme}",
+		"batcat --color=always --style=plain --paging=never {readme}",
+		"cat {readme}",
+		"ls -la",
+	},
 	-- This package's directory, absolute or relative to $HOME. Found from
 	-- the module's path by default.
 	root = nil,
 })
+```
+
+For example, to list directories with eza, or preview them with sesh:
+
+```lua
+preview = { "eza --all --icons --color=always", "ls -la" },
+preview = { "sesh preview" },
 ```
 
 ## Picker keys

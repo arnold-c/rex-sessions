@@ -29,9 +29,11 @@ from REX_PICKER_CLIENT_ID (see servers.lua).
 Pins live on the server whose sessions they are (see the pin actions in
 lua/rex_sessions/init.lua), so every picker shows the same ones.
 
-Needs fzf. Uses zoxide (alt-z) and bat (README previews, else cat) when
-installed. Standard library only, and Python 3.9 compatible for macOS's
-/usr/bin/python3.
+REX_PICKER_PREVIEW holds the commands that preview a directory, one per
+line (see `preview` in lua/rex_sessions/init.lua).
+
+Needs fzf. Uses zoxide (alt-z) when installed. Standard library only,
+and Python 3.9 compatible for macOS's /usr/bin/python3.
 """
 
 from __future__ import annotations
@@ -51,8 +53,6 @@ SELF = f"{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))}"
 HOME = str(Path.home())
 DEVNULL = subprocess.DEVNULL
 HAS_ZOXIDE = shutil.which("zoxide") is not None
-BAT = shutil.which("bat") or shutil.which("batcat")  # batcat on Debian
-SHOW_FILE = [BAT, "--color=always", "--style=plain", "--paging=never"] if BAT else ["cat"]
 
 
 def env(name: str) -> str:
@@ -287,9 +287,26 @@ def preview(server: str, kind: str, label: str, dir: str, id: str) -> None:
 
 
 def preview_dir(dir: str) -> None:
-    """DIR's README (see SHOW_FILE), or its listing if it has none."""
+    """Runs the first of REX_PICKER_PREVIEW's commands that applies to
+    DIR, or lists it."""
     found = readme(dir)
-    subprocess.run([*SHOW_FILE, str(found)] if found else ["ls", "-la", dir])
+    commands = env("REX_PICKER_PREVIEW").splitlines()
+    applicable = (preview_command(c, dir, found) for c in commands)
+    subprocess.run(next(filter(None, applicable), None) or ["ls", "-la", dir])
+
+
+def preview_command(command: str, dir: str, found: Path | None) -> list[str] | None:
+    """COMMAND's words with {dir} and {readme} (the README FOUND in DIR)
+    filled in, or with DIR added at the end when it has neither. None if
+    its program isn't installed, or it shows the README and DIR has none."""
+    words = shlex.split(command)
+    if not words or not shutil.which(words[0]):
+        return None
+    if "{readme}" in command and found is None:
+        return None
+    if "{dir}" not in command and "{readme}" not in command:
+        words.append(dir)
+    return [w.replace("{dir}", dir).replace("{readme}", str(found)) for w in words]
 
 
 def readme(dir: str) -> Path | None:

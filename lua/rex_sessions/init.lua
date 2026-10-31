@@ -61,6 +61,18 @@ M.defaults = {
 	-- The shell that starts the picker, interactively so its PATH (for
 	-- fzf and python3) is loaded. Defaults to $SHELL on the server.
 	shell = nil,
+	-- Commands that preview a directory with no session yet: the first
+	-- whose program is installed on the picker's server. `{readme}` is the
+	-- directory's README (the command is skipped when there's none) and
+	-- `{dir}` the directory, added at the end if neither appears. Falls
+	-- back to `ls -la`. E.g. { "eza --all --color=always" } or
+	-- { "sesh preview" }.
+	preview = {
+		"bat --color=always --style=plain --paging=never {readme}",
+		"batcat --color=always --style=plain --paging=never {readme}",
+		"cat {readme}",
+		"ls -la",
+	},
 	-- This package's directory: absolute, or relative to $HOME.
 	root = default_root(),
 }
@@ -182,12 +194,13 @@ end
 -- but the picker's shell runs on the session's server, whose $HOME may
 -- differ. So let that shell resolve the picker's path and the shell.
 -- $1 is the block the picker opened over, $2 the ID of the app that
--- opened it (see scripts/servers.lua), $3 the picker, $4 the shell.
+-- opened it (see scripts/servers.lua), $3 the picker, $4 the shell, $5
+-- the preview commands, one per line.
 local PICKER_SH = [[
-export REX_PICKER_ORIGIN_BLOCK=$1 REX_PICKER_CLIENT_ID=$2
+export REX_PICKER_ORIGIN_BLOCK=$1 REX_PICKER_CLIENT_ID=$2 REX_PICKER_PREVIEW=$5
 case $3 in /*) picker=$3 ;; *) picker=$HOME/$3 ;; esac
 shell=${4:-${SHELL:-/bin/sh}}
-shift 4
+shift 5
 exec "$shell" -i -c 'exec python3 "$0" "$@"' "$picker" "$@"
 ]]
 
@@ -205,6 +218,7 @@ local function open_session_picker(ctx, ...)
 		ctx.client_id or "",
 		picker,
 		options.shell or "",
+		table.concat(util.list(options.preview), "\n"),
 		...,
 	})
 end
@@ -405,7 +419,7 @@ local function define_actions()
 end
 
 local function bind(keys, action, args)
-	for _, key in ipairs(util.keys(keys)) do
+	for _, key in ipairs(util.list(keys)) do
 		rex.bind(key, action, args)
 	end
 end

@@ -22,8 +22,9 @@ function M.expand(path)
 	return expanded
 end
 
--- A key option as a list: a key, a list of keys, or false/nil for none.
-function M.keys(value)
+-- An option that takes a string, a list of strings, or false/nil for
+-- none, as a list.
+function M.list(value)
 	if type(value) == "string" then
 		return { value }
 	end
