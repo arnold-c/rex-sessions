@@ -275,15 +275,22 @@ def preview(server: str, kind: str, label: str, dir: str, id: str) -> None:
     origin = env("REX_PICKER_ORIGIN_BLOCK")
     if kind == "session":
         if not server and id == env("REX_SESSION") and origin:
-            rex("", "capture", "-b", origin)
+            capture("", "-b", origin)
         else:
-            rex(server, "capture", "-s", id)
+            capture(server, "-s", id)
     elif not dir:
         print(f"{label} has no session or directory. alt-p unpins it.")
     elif not server:
         preview_dir(dir)
     else:
         print(f"New session in {dir} on {server}")
+
+
+def capture(server: str, *target: str) -> None:
+    """Prints TARGET's screen as the terminal draws it: VT sequences keep
+    its colors, such as an editor's syntax highlighting, which fzf's
+    preview shows."""
+    rex(server, "capture", "--format", "vt", *target)
 
 
 def preview_dir(dir: str) -> None:
