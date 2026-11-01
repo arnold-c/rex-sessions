@@ -58,6 +58,10 @@ M.defaults = {
 	-- `cwd` if missing (expanded by the picker on the session's server):
 	-- { { keys = "cmd+c", label = "dotfiles", cwd = "~/.config" } }
 	toggles = {},
+	-- The server whose sessions the picker opens on: "local" for the
+	-- session you're in (a remote's in a remote session), or "home" for
+	-- the machine you're using.
+	start_server = "local",
 	-- The shell that starts the picker, interactively so its PATH (for
 	-- fzf and python3) is loaded. Defaults to $SHELL on the server.
 	shell = nil,
@@ -195,12 +199,13 @@ end
 -- differ. So let that shell resolve the picker's path and the shell.
 -- $1 is the block the picker opened over, $2 the ID of the app that
 -- opened it (see scripts/servers.lua), $3 the picker, $4 the shell, $5
--- the preview commands, one per line.
+-- the preview commands, one per line, $6 the start server.
 local PICKER_SH = [[
 export REX_PICKER_ORIGIN_BLOCK=$1 REX_PICKER_CLIENT_ID=$2 REX_PICKER_PREVIEW=$5
+export REX_PICKER_START=$6
 case $3 in /*) picker=$3 ;; *) picker=$HOME/$3 ;; esac
 shell=${4:-${SHELL:-/bin/sh}}
-shift 5
+shift 6
 exec "$shell" -i -c 'exec python3 "$0" "$@"' "$picker" "$@"
 ]]
 
@@ -219,6 +224,7 @@ local function open_session_picker(ctx, ...)
 		picker,
 		options.shell or "",
 		table.concat(util.list(options.preview), "\n"),
+		options.start_server,
 		...,
 	})
 end
@@ -455,6 +461,10 @@ function M.setup(opts)
 	opts = opts or {}
 	options = merge(M.defaults, opts)
 	options.keys = merge(M.defaults.keys, opts.keys)
+	local start = options.start_server
+	if start ~= "local" and start ~= "home" then
+		error('start_server must be "local" or "home", not ' .. tostring(start), 0)
+	end
 	define_actions()
 	bind_keys()
 end

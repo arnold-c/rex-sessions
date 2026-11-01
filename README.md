@@ -96,6 +96,10 @@ require("rex_sessions").setup({
 	toggles = {
 		-- { keys = "cmd+c", label = "dotfiles", cwd = "~/.config" },
 	},
+	-- The server whose sessions the picker opens on: "local" for the
+	-- session you're in (a remote's in a remote session), or "home" for
+	-- the machine you're using.
+	start_server = "local",
 	-- The shell that starts the picker, interactively so fzf and python3
 	-- are on its PATH. Defaults to $SHELL.
 	shell = nil,
@@ -137,7 +141,11 @@ preview = { "sesh preview" },
 
 ## Remote servers
 
-The picker lists the servers from your Rex hosts (`rex hosts`).
+The picker lists the servers from your Rex hosts (`rex hosts`). It
+opens on the server of the session you're in: a remote server's
+sessions while you're in one of them, and this machine's otherwise.
+Set `start_server = "home"` to always open on this machine's server.
+`alt-s` returns to this machine's server.
 
 - To browse a server with `alt-r`, set this package up in that server's
   config too, with `repos` pointing at that machine's repos. The picker

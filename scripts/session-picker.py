@@ -20,9 +20,11 @@ Rows are tab-separated: server, kind (session|dir), label, dir, session
 id, display text (see session-list.lua).
 
 MODE is local (the server running this picker, i.e. the session's),
-remote:SERVER, or zoxide (when installed). The home mode is the server on the machine
-you're using, which differs from local in a remote session, and the
-remotes are the others; alt-r offers those that answer.
+remote:SERVER, or zoxide (when installed). The home mode is the server
+on the machine you're using, which differs from local in a remote
+session, and the remotes are the others; alt-r offers those that
+answer. The picker starts in local, or in home when REX_PICKER_START is
+"home" (see start_server in lua/rex_sessions/init.lua).
 REX_PICKER_CLIENT is the label of the app that opened the picker, found
 from REX_PICKER_CLIENT_ID (see servers.lua).
 
@@ -127,6 +129,10 @@ def load_servers() -> None:
 
 def home() -> str:
     return env("REX_PICKER_HOME") or "local"
+
+
+def start_mode() -> str:
+    return home() if env("REX_PICKER_START") == "home" else "local"
 
 
 def server(mode: str) -> str:
@@ -361,7 +367,7 @@ def pick() -> bool:
     os.environ["REX_PICKER_STATE"] = tempfile.mkdtemp()
     try:
         load_servers()
-        choice = fzf(set_mode(home()))
+        choice = fzf(set_mode(start_mode()))
     finally:
         shutil.rmtree(env("REX_PICKER_STATE"))
     if choice is None:
