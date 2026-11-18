@@ -10,7 +10,7 @@ toggle_session actions in lua/rex_sessions/init.lua.
   session-picker.py next-server                   remember the next remote
   session-picker.py refresh-remotes               cache the remotes that answer
   session-picker.py current                       list the remembered mode
-  session-picker.py fresh                         list it, fetching a remote's rows
+  session-picker.py fresh SERVER                  list it, fetching SERVER's rows
   session-picker.py pin SERVER LABEL DIR ID       pin or unpin LABEL
   session-picker.py move-pin SERVER LABEL ID up|down
   session-picker.py kill SERVER ID                close a session
@@ -125,10 +125,6 @@ def fetch_rows(server: str, **kwargs) -> str | None:
     return found.stdout if found.returncode == 0 else None
 
 
-def list_rows(server: str) -> None:
-    print(fetch_rows(server) or "", end="")
-
-
 def cache_file(server: str) -> Path:
     return CACHE / (server.replace("/", "_") + ".tsv")
 
@@ -159,6 +155,12 @@ def remote_rows(server: str, fresh: bool) -> str:
     if cached is not None and not fresh:
         return cached
     return refresh(server) or cached or ""
+
+
+def server_rows(server: str, fresh: bool) -> str:
+    """SERVER's rows: this server's fetched, as it answers at once, and a
+    remote's as in remote_rows."""
+    return remote_rows(server, fresh) if server else fetch_rows("") or ""
 
 
 def tilde(path: str) -> str:
@@ -287,16 +289,14 @@ def refresh_remotes() -> None:
     print("+".join(actions))
 
 
-def current(fresh: bool = False) -> None:
-    """Lists the remembered mode: a remote's from its cache, unless FRESH
-    (after a change, such as a pin) or it has none."""
+def current(fresh: str | None = None) -> None:
+    """Lists the remembered mode: a remote's from its cache, unless it's
+    FRESH (changed, such as by a pin) or has none."""
     mode = current_mode()
     if mode == "zoxide":
         zoxide_rows()
-    elif server(mode):
-        print(remote_rows(server(mode), fresh), end="")
     else:
-        list_rows("")
+        print(server_rows(server(mode), server(mode) == fresh), end="")
 
 
 def pin(server: str, label: str, dir: str, id: str) -> None:
@@ -323,7 +323,7 @@ def move_pin(server: str, label: str, id: str, direction: str) -> None:
     command = ["do", *session, "move_pin", "--args", args]
     moved = run_rex(server, *command, stdout=DEVNULL, stderr=subprocess.PIPE, text=True)
     if moved.returncode == 0:
-        print(f"change-footer()+reload({SELF} fresh)+{direction}")
+        print(f"change-footer()+reload({SELF} fresh {shlex.quote(server)})+{direction}")
     else:
         error = (moved.stderr.strip().splitlines() or ["rex failed"])[-1]
         print("change-footer:" + error.removeprefix("Error: "))
@@ -448,10 +448,10 @@ def fzf(first_prompt: str, remotes: list[str]) -> str | None:
         "start": refresh if remotes else f"unbind(alt-r)+{refresh}",
         "alt-s": f"transform-prompt({SELF} home)+reload({SELF} current)",
         "alt-r": f"transform-prompt({SELF} next-server)+reload({SELF} current)",
-        "alt-p": f"execute({SELF} pin {{1}} {{3}} {{4}} {{5}})+reload({SELF} fresh)",
+        "alt-p": f"execute({SELF} pin {{1}} {{3}} {{4}} {{5}})+reload({SELF} fresh {{1}})",
         "alt-u": f"transform({SELF} move-pin {{1}} {{3}} {{5}} up)",
         "alt-d": f"transform({SELF} move-pin {{1}} {{3}} {{5}} down)",
-        "alt-x": f"execute({SELF} kill {{1}} {{5}})+reload({SELF} fresh)",
+        "alt-x": f"execute({SELF} kill {{1}} {{5}})+reload({SELF} fresh {{1}})",
     }
     if HAS_ZOXIDE:
         binds["alt-z"] = f"transform-prompt({SELF} mode zoxide)+reload({SELF} current)"
@@ -531,7 +531,7 @@ def main(argv: list[str]) -> None:
     elif command == "current":
         current()
     elif command == "fresh":
-        current(fresh=True)
+        current(fresh=a[0])
     elif command == "pin":
         pin(a[0], a[1], a[2], a[3])
     elif command == "move-pin":
