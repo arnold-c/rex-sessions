@@ -105,10 +105,16 @@ def own_session() -> str:
     return env("REX_SESSION") if env("REX_PICKER_RETURN_SESSION") else ""
 
 
-def list_rows(server: str) -> None:
+def fetch_rows(server: str, **kwargs) -> str | None:
+    """SERVER's rows from session-list.lua, or None if it failed."""
     script = str(SCRIPT.parent / "session-list.lua")
-    hide = "" if server else own_session()
-    rex(server, "do", script, "--args", json.dumps({"server": server, "hide": hide}))
+    args = json.dumps({"server": server, "hide": "" if server else own_session()})
+    found = run_rex(server, "do", script, "--args", args, stdout=subprocess.PIPE, text=True, **kwargs)
+    return found.stdout if found.returncode == 0 else None
+
+
+def list_rows(server: str) -> None:
+    print(fetch_rows(server) or "", end="")
 
 
 def tilde(path: str) -> str:
