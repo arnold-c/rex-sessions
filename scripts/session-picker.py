@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Rex session picker, like sesh for tmux. Opened in a floating layer by
-the pick_repo_session and toggle_session actions in
-lua/rex_sessions/init.lua.
+"""Rex session picker, like sesh for tmux. Opened in a floating layer, or
+in a session of its own (see below), by the pick_repo_session and
+toggle_session actions in lua/rex_sessions/init.lua.
 
   session-picker.py                               pick a session or dir
   session-picker.py open SERVER LABEL [DIR]       switch, creating in DIR
@@ -19,14 +19,21 @@ SERVER is a Rex host label, or "" for the server running this picker.
 Rows are tab-separated: server, kind (session|dir), label, dir, session
 id, display text (see session-list.lua).
 
-MODE is local (the server running this picker, i.e. the session's),
-remote:SERVER, or zoxide (when installed). The home mode is the server
-on the machine you're using, which differs from local in a remote
-session, and the remotes are the others; alt-r offers those that
-answer. The picker starts in local, or in home when REX_PICKER_START is
-"home" (see start_server in lua/rex_sessions/init.lua).
+MODE is local (the server running this picker), remote:SERVER, or
+zoxide (when installed). The home mode is the server on the machine
+you're using, which differs from local in a picker opened over a
+remote session, and the remotes are the others; alt-r offers those
+that answer. The picker starts in REX_PICKER_START: local, home, or
+remote:SERVER (see start_server in lua/rex_sessions/init.lua).
 REX_PICKER_CLIENT is the label of the app that opened the picker, found
 from REX_PICKER_CLIENT_ID (see servers.lua).
+
+A picker opened from a session on another server runs in a session of
+its own on the app's machine (see open_picker_session in
+lua/rex_sessions/init.lua). REX_PICKER_RETURN_SERVER and
+REX_PICKER_RETURN_SESSION name the session it was opened from: it
+returns there if cancelled, hides its own session, and closes it when
+done.
 
 Pins live on the server whose sessions they are (see the pin actions in
 lua/rex_sessions/init.lua), so every picker shows the same ones.
@@ -92,9 +99,16 @@ def row(server: str, kind: str, label: str, dir: str, id: str, display: str) -> 
     return "\t".join([server, kind, label, dir, id, display])
 
 
+def own_session() -> str:
+    """The ID of this picker's own session, or "" for one opened in a
+    layer over another session."""
+    return env("REX_SESSION") if env("REX_PICKER_RETURN_SESSION") else ""
+
+
 def list_rows(server: str) -> None:
     script = str(SCRIPT.parent / "session-list.lua")
-    rex(server, "do", script, "--args", json.dumps({"server": server}))
+    hide = "" if server else own_session()
+    rex(server, "do", script, "--args", json.dumps({"server": server, "hide": hide}))
 
 
 def tilde(path: str) -> str:
@@ -132,7 +146,10 @@ def home() -> str:
 
 
 def start_mode() -> str:
-    return home() if env("REX_PICKER_START") == "home" else "local"
+    start = env("REX_PICKER_START")
+    if start == "home":
+        return home()
+    return start if start.startswith("remote:") else "local"
 
 
 def server(mode: str) -> str:
@@ -238,14 +255,25 @@ def move_pin(server: str, label: str, id: str, direction: str) -> None:
 # Sessions ---------------------------------------------------------------------
 
 
-def switch(server: str, label: str, **kwargs) -> bool:
+def app() -> list[str]:
     """A switch run from the CLI has no client to ask unless the app is in
     a session on that server, so target this app. It has the same label
-    on every server it's connected to. JSON args keep labels like `2024`
-    from being read as numbers."""
-    client = ["-C", env("REX_PICKER_CLIENT")] if env("REX_PICKER_CLIENT") else []
+    on every server it's connected to."""
+    return ["-C", env("REX_PICKER_CLIENT")] if env("REX_PICKER_CLIENT") else []
+
+
+def switch(server: str, label: str, **kwargs) -> bool:
+    """Switches the app to LABEL on SERVER. JSON args keep labels like
+    `2024` from being read as numbers."""
     args = json.dumps({"label": label})
-    return rex(server, *client, "do", "switch_session", "--args", args, stdout=DEVNULL, **kwargs)
+    return rex(server, *app(), "do", "switch_session", "--args", args, stdout=DEVNULL, **kwargs)
+
+
+def select(server: str, id: str) -> bool:
+    """Switches the app to session ID on SERVER with the app's own action,
+    which the app only takes through the session's server."""
+    args = json.dumps({"session_id": id})
+    return rex(server, *app(), "do", "session.select", "--args", args, stdout=DEVNULL)
 
 
 def open_session(server: str, label: str, dir: str, id: str) -> bool:
@@ -373,12 +401,36 @@ def choose() -> str | None:
         shutil.rmtree(env("REX_PICKER_STATE"))
 
 
-def pick() -> bool:
+def switched() -> bool:
+    """Whether the app switched to the chosen session."""
     choice = choose()
     if choice is None:
-        return True
+        return False
     srv, _, label, dir, id = (choice.split("\t") + [""] * 5)[:5]
-    return open_session(srv, label, dir, id)
+    if open_session(srv, label, dir, id):
+        return True
+    pause()
+    return False
+
+
+def go_back() -> None:
+    """Returns to the session a picker in its own session was opened from."""
+    id = env("REX_PICKER_RETURN_SESSION")
+    if id and not select(env("REX_PICKER_RETURN_SERVER"), id):
+        pause()
+
+
+def close_own_session() -> None:
+    """Closes this picker's own session, which ends this process too."""
+    own = own_session()
+    if own:
+        os.execvp("rex", ["rex", "kill", own])
+
+
+def pick() -> None:
+    if not switched():
+        go_back()
+    close_own_session()
 
 
 def main(argv: list[str]) -> None:
@@ -406,8 +458,8 @@ def main(argv: list[str]) -> None:
         kill(a[0], a[1])
     elif command == "preview":
         preview(a[0], a[1], a[2], a[3], a[4])
-    elif not pick():
-        pause()
+    else:
+        pick()
 
 
 if __name__ == "__main__":

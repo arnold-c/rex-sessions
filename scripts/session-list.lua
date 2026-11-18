@@ -4,9 +4,11 @@
 -- Usage: rex [-S host] do scripts/session-list.lua --args '{"server":""}'
 -- Prints one tab-separated row per entry: server, kind (session|dir),
 -- label, dir (to create the session in), session id, display text.
+-- `hide` is the ID of a session to leave out: the picker's own.
 
 local args = rex.args or {}
 local server = args.server or ""
+local hide = args.hide or ""
 
 local function fail(err)
 	rex.log("error", err)
@@ -16,6 +18,13 @@ end
 local listed, list_err = rex.call("session.list")
 if not listed then
 	fail(list_err)
+end
+
+local sessions = {}
+for _, session in ipairs(listed.sessions or {}) do
+	if session.session_id ~= hide then
+		table.insert(sessions, session)
+	end
 end
 
 local repos, repos_err = rex.invoke("list_repos")
@@ -29,7 +38,7 @@ if not listed_pins then
 end
 
 local session_ids = {}
-for _, session in ipairs(listed.sessions or {}) do
+for _, session in ipairs(sessions) do
 	session_ids[session.label] = session.session_id
 end
 
@@ -54,7 +63,7 @@ for i, pin in ipairs(listed_pins.pins or {}) do
 	row(kind, pin.label, pin.dir or repo_dirs[pin.label], "📌" .. i)
 end
 
-for _, session in ipairs(listed.sessions or {}) do
+for _, session in ipairs(sessions) do
 	if not pinned[session.label] then
 		row("session", session.label, nil, "●")
 	end

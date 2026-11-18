@@ -79,6 +79,9 @@ M.defaults = {
 	},
 	-- This package's directory: absolute, or relative to $HOME.
 	root = default_root(),
+	-- The `rex` CLI on this machine, which opens the picker in a session
+	-- of its own when you're in a session on another server.
+	rex_cli = os.getenv("REX_BIN_DIR") and os.getenv("REX_BIN_DIR") .. "/rex" or "rex",
 }
 
 local options = M.defaults
@@ -195,23 +198,27 @@ local function open_layer(ctx, command)
 end
 
 -- This config runs on the app's own server even for a remote session,
--- but the picker's shell runs on the session's server, whose $HOME may
+-- but a picker's layer runs on the session's server, whose $HOME may
 -- differ. So let that shell resolve the picker's path and the shell.
 -- $1 is the block the picker opened over, $2 the ID of the app that
 -- opened it (see scripts/servers.lua), $3 the picker, $4 the shell, $5
--- the preview commands, one per line, $6 the start server.
+-- the preview commands, one per line, $6 the start mode, and $7 and $8
+-- the server and ID of the session to return to (see
+-- open_picker_session).
 local PICKER_SH = [[
 export REX_PICKER_ORIGIN_BLOCK=$1 REX_PICKER_CLIENT_ID=$2 REX_PICKER_PREVIEW=$5
-export REX_PICKER_START=$6
+export REX_PICKER_START=$6 REX_PICKER_RETURN_SERVER=$7 REX_PICKER_RETURN_SESSION=$8
 case $3 in /*) picker=$3 ;; *) picker=$HOME/$3 ;; esac
 shell=${4:-${SHELL:-/bin/sh}}
-shift 6
+shift 8
 exec "$shell" -i -c 'exec python3 "$0" "$@"' "$picker" "$@"
 ]]
 
 -- The command that runs session-picker.py with these arguments (see
--- PICKER_SH for the others).
-local function picker_command(origin_block, client_id, start, ...)
+-- PICKER_SH for the others). `back` is { server, session_id } for a
+-- picker in a session of its own.
+local function picker_command(origin_block, client_id, start, back, ...)
+	back = back or {}
 	return {
 		"/bin/sh",
 		"-c",
@@ -223,6 +230,8 @@ local function picker_command(origin_block, client_id, start, ...)
 		options.shell or "",
 		table.concat(util.list(options.preview), "\n"),
 		start,
+		back.server or "",
+		back.session_id or "",
 		...,
 	}
 end
@@ -231,7 +240,32 @@ end
 -- current window. The picker's layer becomes the focused block, so pass
 -- the pane it opened over for previewing the current session.
 local function open_session_picker(ctx, ...)
-	open_layer(ctx, picker_command(ctx.block_id, ctx.client_id, options.start_server, ...))
+	open_layer(ctx, picker_command(ctx.block_id, ctx.client_id, options.start_server, nil, ...))
+end
+
+-- The label of a picker's own session, which the picker hides.
+local PICKER_LABEL = "rex-sessions picker"
+
+-- In a session on another server, a layer would run the picker there,
+-- where this machine's sessions can't be listed and every key crosses
+-- the network. So run it in a session of its own on this machine, and
+-- switch the app to it. The picker opens on the session's server (or
+-- this one, with start_server "home"), returns there if cancelled, and
+-- closes its session when done. API calls here go to the session's
+-- server, so create the session with this machine's CLI.
+local function open_picker_session(ctx)
+	local start = options.start_server == "home" and "local" or "remote:" .. ctx.server
+	local back = { server = ctx.server, session_id = ctx.session_id }
+	local argv = { options.rex_cli, "new", "--shell", "none", PICKER_LABEL, "--" }
+	for _, arg in ipairs(picker_command(nil, ctx.client_id, start, back)) do
+		table.insert(argv, arg)
+	end
+	local created, err = rex.exec(argv)
+	local session_id = created and created.ok and created.stdout:match("session:%S+")
+	if not session_id then
+		error("couldn't open the picker with " .. options.rex_cli .. " (see rex_cli): " .. (err or created.stderr), 0)
+	end
+	client.select(ctx, nil, { session_id = session_id })
 end
 
 -- The first of options.repos that exists on this server.
@@ -424,7 +458,11 @@ local function define_actions()
 		category = "Sessions",
 		run = function(ctx)
 			note_session(ctx)
-			open_session_picker(ctx)
+			if ctx.server then
+				open_picker_session(ctx)
+			else
+				open_session_picker(ctx)
+			end
 		end,
 	})
 end

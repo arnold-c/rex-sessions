@@ -117,6 +117,10 @@ require("rex_sessions").setup({
 	-- This package's directory, absolute or relative to $HOME. Found from
 	-- the module's path by default.
 	root = nil,
+	-- This machine's `rex` CLI, which opens the picker in a session of
+	-- its own when you're in a session on another server. Defaults to
+	-- $REX_BIN_DIR/rex, or `rex` on the server's PATH.
+	rex_cli = nil,
 })
 ```
 
@@ -147,14 +151,21 @@ sessions while you're in one of them, and this machine's otherwise.
 Set `start_server = "home"` to always open on this machine's server.
 `alt-s` returns to this machine's server.
 
+The picker always runs on this machine, so its keys never cross the
+network. A floating layer runs on the server of its session, so while
+you're in a session on another server, the picker opens in a session
+of its own here (`rex-sessions picker`), which it closes when done.
+Cancelling it returns to the session you were in.
+
 - To browse a server with `alt-r`, set this package up in that server's
   config too, with `repos` pointing at that machine's repos. The picker
   asks each server's own config for its repos, pins, and sessions.
-- To open the picker while you're in a session on another server,
-  install it there at the same path relative to `$HOME` (see
+- To use a toggle or pin key that creates a session on another server,
+  install this package there at the same path relative to `$HOME` (see
   [Multiple machines](#multiple-machines)), with `python3` and `fzf`.
   Keys run on your own machine's server, which passes its path for the
-  picker, but the picker starts on the session's server.
+  picker, but creating a session starts the picker over the session
+  you're in, on its server.
 - To use the pin keys while you're in a session on another server, set
   this package up in that server's config too. The keys go to that
   server's pins, which a hidden terminal there asks its config for
