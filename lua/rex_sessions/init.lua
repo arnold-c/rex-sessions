@@ -58,10 +58,11 @@ M.defaults = {
 	-- `cwd` if missing (expanded by the picker on the session's server):
 	-- { { keys = "cmd+c", label = "dotfiles", cwd = "~/.config" } }
 	toggles = {},
-	-- The server whose sessions the picker opens on: "local" for the
-	-- session you're in (a remote's in a remote session), or "home" for
-	-- the machine you're using.
-	start_server = "local",
+	-- What the picker opens on: "open" for the open sessions on every
+	-- server, the session's server first; "local" for the sessions and
+	-- repos of the session's server (a remote's in a remote session); or
+	-- "home" for those of the machine you're using.
+	start_server = "open",
 	-- The shell that starts the picker, interactively so its PATH (for
 	-- fzf and python3) is loaded. Defaults to $SHELL on the server.
 	shell = nil,
@@ -269,12 +270,13 @@ end
 -- In a session on another server, a layer would run the picker there,
 -- where this machine's sessions can't be listed and every key crosses
 -- the network. So run it in a session of its own on this machine, and
--- switch the app to it. The picker opens on the session's server (or
--- this one, with start_server "home"), returns there if cancelled, and
+-- switch the app to it. The picker opens as start_server says, with
+-- "local" meaning the session's server, returns there if cancelled, and
 -- closes its session when done. API calls here go to the session's
 -- server, so create the session with this machine's CLI.
 local function open_picker_session(ctx)
-	local start = options.start_server == "home" and "local" or "remote:" .. ctx.server
+	local starts = { open = "open", home = "local", ["local"] = "remote:" .. ctx.server }
+	local start = starts[options.start_server]
 	local back = { server = ctx.server, session_id = ctx.session_id }
 	local cli = rex_cli()
 	local argv = { cli, "new", "--shell", "none", PICKER_LABEL, "--" }
@@ -526,8 +528,8 @@ function M.setup(opts)
 	options = merge(M.defaults, opts)
 	options.keys = merge(M.defaults.keys, opts.keys)
 	local start = options.start_server
-	if start ~= "local" and start ~= "home" then
-		error('start_server must be "local" or "home", not ' .. tostring(start), 0)
+	if start ~= "open" and start ~= "local" and start ~= "home" then
+		error('start_server must be "open", "local", or "home", not ' .. tostring(start), 0)
 	end
 	define_actions()
 	bind_keys()

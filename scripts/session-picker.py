@@ -18,14 +18,17 @@ toggle_session actions in lua/rex_sessions/init.lua.
 
 SERVER is a Rex host label, or "" for the server running this picker.
 Rows are tab-separated: server, kind (session|dir), label, dir, session
-id, display text (see session-list.lua).
+id, display text (see session-list.lua), and, in the open mode, the
+server's name, which is shown but not searched.
 
-MODE is local (the server running this picker), remote:SERVER, or
-zoxide (when installed). The home mode is the server on the machine
-you're using, which differs from local in a picker opened over a
-remote session, and the remotes are the others; alt-r offers those
-that answer. The picker starts in REX_PICKER_START: local, home, or
-remote:SERVER (see start_server in lua/rex_sessions/init.lua).
+MODE is open (every server's open sessions), local (the server running
+this picker), remote:SERVER, or zoxide (when installed). The home mode
+is the server on the machine you're using, which differs from local in
+a picker opened over a remote session, and the remotes are the others;
+alt-r offers those that answer. The active server is the one of the
+session the picker was opened from, which open lists first. The picker
+starts in REX_PICKER_START: open, local, home, or remote:SERVER (see
+start_server in lua/rex_sessions/init.lua).
 REX_PICKER_CLIENT is the label of the app that opened the picker, found
 from REX_PICKER_CLIENT_ID (see servers.lua).
 
@@ -40,8 +43,8 @@ Every call to a remote opens a new connection, which can take a second
 over a long link. So a remote's rows are cached, in
 $XDG_CACHE_HOME/rex-sessions/SERVER.tsv, and shown from the cache;
 once fzf is up, every remote is fetched in the background, and the
-rows reload if they're shown. alt-r offers the remotes with a cache at
-first, then those that answered.
+rows reload if they're shown. alt-r, and the open mode, offer the
+remotes with a cache at first, then those that answered.
 
 Pins live on the server whose sessions they are (see the pin actions in
 lua/rex_sessions/init.lua), so every picker shows the same ones.
@@ -63,6 +66,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -74,6 +78,12 @@ HAS_ZOXIDE = shutil.which("zoxide") is not None
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "rex-sessions"
 # Seconds to wait for a remote in the background, e.g. a sleeping laptop.
 FETCH_TIMEOUT = 10
+# fzf's default tab width, kept as --tabstop would change the preview's too.
+TABSTOP = 8
+# Columns of fzf's list that aren't a row's text (see list_width).
+LIST_FRAME = 8
+# ANSI colors for server names: cyan, magenta, yellow, green, blue, red.
+SERVER_COLORS = [36, 35, 33, 32, 34, 31]
 
 
 def env(name: str) -> str:
@@ -201,7 +211,14 @@ def start_mode() -> str:
     start = env("REX_PICKER_START")
     if start == "home":
         return home()
-    return start if start.startswith("remote:") else "local"
+    return start if start == "open" or start.startswith("remote:") else "local"
+
+
+def active() -> str:
+    """The mode of the session the picker was opened from: the one it
+    returns to, or, for a picker in a layer, the one under it."""
+    back = env("REX_PICKER_RETURN_SERVER")
+    return f"remote:{back}" if back else "local"
 
 
 def server(mode: str) -> str:
@@ -210,13 +227,16 @@ def server(mode: str) -> str:
 
 
 def server_name(mode: str) -> str:
-    """A host label, or this machine's hostname for local."""
-    return server(mode) or socket.gethostname().split(".")[0]
+    """A host label, or this machine's hostname for local, up to the
+    first dot: without a domain, such as a tailnet's."""
+    return (server(mode) or socket.gethostname()).split(".")[0]
 
 
 def prompt(mode: str) -> str:
     if mode == "zoxide":
         return "📂 zoxide ❯ "
+    if mode == "open":
+        return "● open ❯ "
     icon = "💻" if mode == home() else "🖥 "
     return f"{icon} {server_name(mode)} ❯ "
 
@@ -224,7 +244,7 @@ def prompt(mode: str) -> str:
 def header(remotes: list[str]) -> str:
     """The keys, with alt-r cycling through REMOTES (modes).
     Not alt-l: Rex configs often bind alt+h/j/k/l to pane resizing."""
-    keys = [f"alt-s: {server_name(home())}"]
+    keys = ["alt-o: open", f"alt-s: {server_name(home())}"]
     if remotes:
         keys.append("alt-r: " + ", ".join(server_name(mode) for mode in remotes))
     if HAS_ZOXIDE:
@@ -257,6 +277,67 @@ def set_remotes(remotes: list[str]) -> None:
     state("remotes").write_text("".join(mode + "\n" for mode in remotes))
 
 
+def open_modes() -> list[str]:
+    """The servers (modes) the open mode lists: the active one, home, then
+    the remotes alt-r offers."""
+    remotes = state("remotes").read_text().splitlines()
+    return list(dict.fromkeys([active(), home(), *remotes]))
+
+
+def session_rows(rows: str) -> list[list[str]]:
+    """The fields of ROWS' sessions."""
+    found = (line.split("\t") for line in rows.splitlines())
+    return [fields for fields in found if len(fields) == 6 and fields[1] == "session"]
+
+
+def width(text: str) -> int:
+    """TEXT's width in a terminal, where emoji such as 📌 take two columns."""
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+def past_tab(text: str) -> int:
+    """The column after TEXT and the tab fzf shows after it: fzf expands
+    a row's tabs from the row's start."""
+    return (width(text) // TABSTOP + 1) * TABSTOP
+
+
+def list_width() -> int | None:
+    """The columns for a row's text in fzf's list, beside the preview, or
+    None if fzf didn't say. fzf gives the commands it runs its width and
+    the preview's text width; the preview's border takes LIST_FRAME's
+    first 4 columns, the row's pointer, marker, and the list's
+    scrollbar 3 more, and a last one keeps the text off the border."""
+    try:
+        return int(env("FZF_COLUMNS")) - int(env("FZF_PREVIEW_COLUMNS")) - LIST_FRAME
+    except ValueError:
+        return None
+
+
+def server_color(mode: str) -> str:
+    """MODE's server name in its own color, which stays the same across
+    pickers: picked by the server's place among the servers."""
+    servers = list(dict.fromkeys([home(), *env("REX_PICKER_REMOTES").splitlines()]))
+    i = servers.index(mode) if mode in servers else len(servers)
+    return f"\x1b[{SERVER_COLORS[i % len(SERVER_COLORS)]}m{server_name(mode)}\x1b[0m"
+
+
+def open_rows(fresh: str | None) -> None:
+    """The session rows of the servers in open_modes, as in server_rows,
+    with the server's name, in its color, after the display text and a
+    tab. The names are right-aligned against the preview, or, if the
+    list's width isn't known or is too narrow, against the longest row."""
+    found = [
+        (fields, mode)
+        for mode in open_modes()
+        for fields in session_rows(server_rows(server(mode), server(mode) == fresh))
+    ]
+    ends = [past_tab(fields[5]) + width(server_name(mode)) for fields, mode in found]
+    end = max([list_width() or 0, *ends])
+    for (fields, mode), shortest in zip(found, ends):
+        name = " " * (end - shortest) + server_color(mode)
+        print("\t".join([*fields[:5], fields[5], name]))
+
+
 def cached_remotes() -> list[str]:
     return [m for m in env("REX_PICKER_REMOTES").splitlines() if cache_file(server(m)).exists()]
 
@@ -275,14 +356,17 @@ def refresh_remotes() -> None:
     every remote at once, as each call can take a second, or a remote
     that's off, like a laptop, the timeout. Remembers the remotes that
     answer for next_server, and prints the fzf actions that offer alt-r
-    for them and reload the rows if a remote's are shown."""
+    for them and reload the rows if a remote's are shown, or the open
+    mode's, which lists those remotes."""
     remotes = env("REX_PICKER_REMOTES").splitlines()
     if not remotes:
         return
     with ThreadPoolExecutor(max_workers=len(remotes)) as pool:
         answered = [m for m, ok in zip(remotes, pool.map(answers, remotes)) if ok]
     set_remotes(answered)
-    actions = [f"reload({SELF} current)"] if current_mode() in answered else []
+    mode = current_mode()
+    shown = mode == "open" or mode in answered
+    actions = [f"reload({SELF} current)"] if shown else []
     actions.append("rebind(alt-r)" if answered else "unbind(alt-r)")
     # Last, as the header runs to the end.
     actions.append(f"change-header:{header(answered)}")
@@ -295,6 +379,8 @@ def current(fresh: str | None = None) -> None:
     mode = current_mode()
     if mode == "zoxide":
         zoxide_rows()
+    elif mode == "open":
+        open_rows(fresh)
     else:
         print(server_rows(server(mode), server(mode) == fresh), end="")
 
@@ -441,22 +527,31 @@ def readme(dir: str) -> Path | None:
 
 def fzf(first_prompt: str, remotes: list[str]) -> str | None:
     """The chosen row, or None if fzf was cancelled. fzf reads the rows
-    from FZF_DEFAULT_COMMAND, as its input is the terminal. alt-r offers
-    REMOTES until refresh_remotes finds those that answer."""
+    from FZF_DEFAULT_COMMAND, as its input is the terminal, before it
+    knows its width (see list_width), so they reload once loaded, and
+    when fzf is resized. alt-r offers REMOTES until refresh_remotes
+    finds those that answer. Rows show their display text and any
+    server name, and only the display text is searched (--nth counts
+    the shown fields)."""
+    reload = f"reload({SELF} current)"
     refresh = f"bg-transform({SELF} refresh-remotes)"
     binds = {
         "start": refresh if remotes else f"unbind(alt-r)+{refresh}",
-        "alt-s": f"transform-prompt({SELF} home)+reload({SELF} current)",
-        "alt-r": f"transform-prompt({SELF} next-server)+reload({SELF} current)",
+        "load": f"unbind(load)+{reload}",
+        "resize": reload,
+        "alt-o": f"transform-prompt({SELF} mode open)+{reload}",
+        "alt-s": f"transform-prompt({SELF} home)+{reload}",
+        "alt-r": f"transform-prompt({SELF} next-server)+{reload}",
         "alt-p": f"execute({SELF} pin {{1}} {{3}} {{4}} {{5}})+reload({SELF} fresh {{1}})",
         "alt-u": f"transform({SELF} move-pin {{1}} {{3}} {{5}} up)",
         "alt-d": f"transform({SELF} move-pin {{1}} {{3}} {{5}} down)",
         "alt-x": f"execute({SELF} kill {{1}} {{5}})+reload({SELF} fresh {{1}})",
     }
     if HAS_ZOXIDE:
-        binds["alt-z"] = f"transform-prompt({SELF} mode zoxide)+reload({SELF} current)"
+        binds["alt-z"] = f"transform-prompt({SELF} mode zoxide)+{reload}"
     args = [
-        "fzf", "--delimiter", r"\t", "--with-nth", "6", "--reverse", "--no-sort",
+        "fzf", "--delimiter", r"\t", "--with-nth", "6..", "--nth", "1", "--ansi",
+        "--reverse", "--no-sort",
         "--border-label", " rex sessions ", "--prompt", first_prompt, "--header", header(remotes),
         "--bind", "tab:down,btab:up",
         *(arg for key, action in binds.items() for arg in ("--bind", f"{key}:{action}")),

@@ -5,6 +5,7 @@
 A session picker for [Rex](https://www.superlogical.com/rex), like
 [sesh](https://github.com/joshmedeski/sesh) for tmux:
 
+- switch between the open sessions on all your Rex servers
 - fuzzy-find a session, or a repo to start one in, with a live preview
 - pin sessions, reorder the pins, and jump to them with `cmd+alt+1`–`9`
 - browse and switch to sessions on your other Rex servers (`alt-r`)
@@ -96,10 +97,11 @@ require("rex_sessions").setup({
 	toggles = {
 		-- { keys = "cmd+c", label = "dotfiles", cwd = "~/.config" },
 	},
-	-- The server whose sessions the picker opens on: "local" for the
-	-- session you're in (a remote's in a remote session), or "home" for
-	-- the machine you're using.
-	start_server = "local",
+	-- What the picker opens on: "open" for the open sessions on every
+	-- server, the session's server first; "local" for the sessions and
+	-- repos of the session's server (a remote's in a remote session); or
+	-- "home" for those of the machine you're using.
+	start_server = "open",
 	-- The shell that starts the picker, interactively so fzf and python3
 	-- are on its PATH. Defaults to $SHELL.
 	shell = nil,
@@ -141,6 +143,7 @@ preview = { "sesh preview" },
 | Key | Does |
 | --- | --- |
 | `enter` | switch to the session, creating it in the repo if needed |
+| `alt-o` | the open sessions on every server |
 | `alt-s` | this machine's server |
 | `alt-r` | cycle through the remote servers that answer |
 | `alt-z` | directories from zoxide |
@@ -151,10 +154,12 @@ preview = { "sesh preview" },
 ## Remote servers
 
 The picker lists the servers from your Rex hosts (`rex hosts`). It
-opens on the server of the session you're in: a remote server's
-sessions while you're in one of them, and this machine's otherwise.
-Set `start_server = "home"` to always open on this machine's server.
-`alt-s` returns to this machine's server.
+opens on the open sessions on every server, each with its server's name
+up to the first dot (so without a tailnet's domain) at the right of the
+list, in that server's own color. The search ignores it. The server of the session you're in comes first,
+then this machine's, then the remotes. `alt-o` returns to them. Set `start_server = "local"`
+to open on the sessions and repos of the session's server instead, or
+`"home"` for this machine's. `alt-s` shows this machine's server.
 
 The picker always runs on this machine, so its keys never cross the
 network. A floating layer runs on the server of its session, so while
@@ -166,12 +171,14 @@ Each call to a remote server opens a new connection, which can take a
 second over a long link. So the picker shows a remote's sessions from
 its last list (`$XDG_CACHE_HOME/rex-sessions/`, or
 `~/.cache/rex-sessions/`), fetches every remote's in the background,
-and updates the list when they arrive. `alt-r` offers the remotes with
-a cached list straight away, then those that answer.
+and updates the list when they arrive. `alt-r` and the open sessions
+offer the remotes with a cached list straight away, then those that
+answer.
 
-- To browse a server with `alt-r`, set this package up in that server's
-  config too, with `repos` pointing at that machine's repos. The picker
-  asks each server's own config for its repos, pins, and sessions.
+- To list a server's open sessions, or browse it with `alt-r`, set this
+  package up in that server's config too, with `repos` pointing at that
+  machine's repos. The picker asks each server's own config for its
+  repos, pins, and sessions.
 - To use a toggle or pin key that creates a session on another server,
   install this package there at the same path relative to `$HOME` (see
   [Multiple machines](#multiple-machines)), with `python3` and `fzf`.
