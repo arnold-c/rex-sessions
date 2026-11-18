@@ -22,6 +22,12 @@ function M.expand(path)
 	return expanded
 end
 
+-- Whether `test FLAG PATH` succeeds on this server, e.g. FLAG "-d" for
+-- a directory.
+function M.test(flag, path)
+	return M.check(rex.exec({ "/bin/test", flag, path })).ok
+end
+
 -- An option that takes a string, a list of strings, or false/nil for
 -- none, as a list.
 function M.list(value)

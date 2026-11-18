@@ -272,7 +272,7 @@ end
 local function repos_dir()
 	for _, candidate in ipairs(options.repos) do
 		local dir = util.expand(candidate)
-		if dir ~= "" and check(rex.exec({ "/bin/test", "-d", dir })).ok then
+		if dir ~= "" and util.test("-d", dir) then
 			return dir
 		end
 	end
