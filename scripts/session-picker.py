@@ -8,8 +8,9 @@ toggle_session actions in lua/rex_sessions/init.lua.
   session-picker.py mode MODE                     remember MODE, print its prompt
   session-picker.py home                          remember the home mode
   session-picker.py next-server                   remember the next remote
-  session-picker.py probe-remotes                 find the remotes that answer
+  session-picker.py refresh-remotes               cache the remotes that answer
   session-picker.py current                       list the remembered mode
+  session-picker.py fresh                         list it, fetching a remote's rows
   session-picker.py pin SERVER LABEL DIR ID       pin or unpin LABEL
   session-picker.py move-pin SERVER LABEL ID up|down
   session-picker.py kill SERVER ID                close a session
@@ -35,6 +36,13 @@ REX_PICKER_RETURN_SESSION name the session it was opened from: it
 returns there if cancelled, hides its own session, and closes it when
 done.
 
+Every call to a remote opens a new connection, which can take a second
+over a long link. So a remote's rows are cached, in
+$XDG_CACHE_HOME/rex-sessions/SERVER.tsv, and shown from the cache;
+once fzf is up, every remote is fetched in the background, and the
+rows reload if they're shown. alt-r offers the remotes with a cache at
+first, then those that answered.
+
 Pins live on the server whose sessions they are (see the pin actions in
 lua/rex_sessions/init.lua), so every picker shows the same ones.
 
@@ -55,6 +63,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve()
@@ -62,6 +71,9 @@ SELF = f"{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))}"
 HOME = str(Path.home())
 DEVNULL = subprocess.DEVNULL
 HAS_ZOXIDE = shutil.which("zoxide") is not None
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "rex-sessions"
+# Seconds to wait for a remote in the background, e.g. a sleeping laptop.
+FETCH_TIMEOUT = 10
 
 
 def env(name: str) -> str:
@@ -115,6 +127,38 @@ def fetch_rows(server: str, **kwargs) -> str | None:
 
 def list_rows(server: str) -> None:
     print(fetch_rows(server) or "", end="")
+
+
+def cache_file(server: str) -> Path:
+    return CACHE / (server.replace("/", "_") + ".tsv")
+
+
+def read_cache(server: str) -> str | None:
+    try:
+        return cache_file(server).read_text()
+    except OSError:
+        return None
+
+
+def refresh(server: str, **kwargs) -> str | None:
+    """Fetches SERVER's rows and caches them, or None if it failed. The
+    cache is replaced whole, as other pickers may be reading it."""
+    rows = fetch_rows(server, **kwargs)
+    if rows is not None:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", dir=CACHE, delete=False) as file:
+            file.write(rows)
+        os.replace(file.name, cache_file(server))
+    return rows
+
+
+def remote_rows(server: str, fresh: bool) -> str:
+    """SERVER's cached rows, or, if FRESH or there are none, its fetched
+    rows, falling back to the cache when it doesn't answer."""
+    cached = read_cache(server)
+    if cached is not None and not fresh:
+        return cached
+    return refresh(server) or cached or ""
 
 
 def tilde(path: str) -> str:
@@ -206,26 +250,53 @@ def next_server() -> str:
     return set_mode(remotes[i % len(remotes)])
 
 
-def probe_remotes() -> None:
-    """Run in the background once fzf is up (see pick), as a remote that's
-    off, like a laptop, takes the connection timeout to fail. Remembers
-    the remotes that answer for next_server, and prints the fzf actions
-    offering alt-r for them."""
+def set_remotes(remotes: list[str]) -> None:
+    """Remembers the remotes (modes) alt-r cycles through."""
+    state("remotes").write_text("".join(mode + "\n" for mode in remotes))
+
+
+def cached_remotes() -> list[str]:
+    return [m for m in env("REX_PICKER_REMOTES").splitlines() if cache_file(server(m)).exists()]
+
+
+def answers(mode: str) -> bool:
+    """Whether MODE's server answered, caching its rows if so."""
+    quiet = {"stderr": DEVNULL, "timeout": FETCH_TIMEOUT}
+    try:
+        return refresh(server(mode), **quiet) is not None
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def refresh_remotes() -> None:
+    """Run in the background once fzf is up (see fzf): caches the rows of
+    every remote at once, as each call can take a second, or a remote
+    that's off, like a laptop, the timeout. Remembers the remotes that
+    answer for next_server, and prints the fzf actions that offer alt-r
+    for them and reload the rows if a remote's are shown."""
     remotes = env("REX_PICKER_REMOTES").splitlines()
-    quiet = {"stdout": DEVNULL, "stderr": DEVNULL}
-    answered = [m for m in remotes if rex(server(m), "api", "call", "server.version", **quiet)]
-    if not answered:
+    if not remotes:
         return
-    state("remotes").write_text("\n".join(answered) + "\n")
-    print(f"rebind(alt-r)+change-header:{header(answered)}")
+    with ThreadPoolExecutor(max_workers=len(remotes)) as pool:
+        answered = [m for m, ok in zip(remotes, pool.map(answers, remotes)) if ok]
+    set_remotes(answered)
+    actions = [f"reload({SELF} current)"] if current_mode() in answered else []
+    actions.append("rebind(alt-r)" if answered else "unbind(alt-r)")
+    # Last, as the header runs to the end.
+    actions.append(f"change-header:{header(answered)}")
+    print("+".join(actions))
 
 
-def current() -> None:
+def current(fresh: bool = False) -> None:
+    """Lists the remembered mode: a remote's from its cache, unless FRESH
+    (after a change, such as a pin) or it has none."""
     mode = current_mode()
     if mode == "zoxide":
         zoxide_rows()
+    elif server(mode):
+        print(remote_rows(server(mode), fresh), end="")
     else:
-        list_rows(server(mode))
+        list_rows("")
 
 
 def pin(server: str, label: str, dir: str, id: str) -> None:
@@ -252,7 +323,7 @@ def move_pin(server: str, label: str, id: str, direction: str) -> None:
     command = ["do", *session, "move_pin", "--args", args]
     moved = run_rex(server, *command, stdout=DEVNULL, stderr=subprocess.PIPE, text=True)
     if moved.returncode == 0:
-        print(f"change-footer()+reload({SELF} current)+{direction}")
+        print(f"change-footer()+reload({SELF} fresh)+{direction}")
     else:
         error = (moved.stderr.strip().splitlines() or ["rex failed"])[-1]
         print("change-footer:" + error.removeprefix("Error: "))
@@ -368,24 +439,25 @@ def readme(dir: str) -> Path | None:
 # Picker -----------------------------------------------------------------------
 
 
-def fzf(first_prompt: str) -> str | None:
+def fzf(first_prompt: str, remotes: list[str]) -> str | None:
     """The chosen row, or None if fzf was cancelled. fzf reads the rows
-    from FZF_DEFAULT_COMMAND, as its input is the terminal."""
+    from FZF_DEFAULT_COMMAND, as its input is the terminal. alt-r offers
+    REMOTES until refresh_remotes finds those that answer."""
+    refresh = f"bg-transform({SELF} refresh-remotes)"
     binds = {
-        # alt-r is unbound until a remote answers (see probe_remotes).
-        "start": f"unbind(alt-r)+bg-transform({SELF} probe-remotes)",
+        "start": refresh if remotes else f"unbind(alt-r)+{refresh}",
         "alt-s": f"transform-prompt({SELF} home)+reload({SELF} current)",
         "alt-r": f"transform-prompt({SELF} next-server)+reload({SELF} current)",
-        "alt-p": f"execute({SELF} pin {{1}} {{3}} {{4}} {{5}})+reload({SELF} current)",
+        "alt-p": f"execute({SELF} pin {{1}} {{3}} {{4}} {{5}})+reload({SELF} fresh)",
         "alt-u": f"transform({SELF} move-pin {{1}} {{3}} {{5}} up)",
         "alt-d": f"transform({SELF} move-pin {{1}} {{3}} {{5}} down)",
-        "alt-x": f"execute({SELF} kill {{1}} {{5}})+reload({SELF} current)",
+        "alt-x": f"execute({SELF} kill {{1}} {{5}})+reload({SELF} fresh)",
     }
     if HAS_ZOXIDE:
         binds["alt-z"] = f"transform-prompt({SELF} mode zoxide)+reload({SELF} current)"
     args = [
         "fzf", "--delimiter", r"\t", "--with-nth", "6", "--reverse", "--no-sort",
-        "--border-label", " rex sessions ", "--prompt", first_prompt, "--header", header([]),
+        "--border-label", " rex sessions ", "--prompt", first_prompt, "--header", header(remotes),
         "--bind", "tab:down,btab:up",
         *(arg for key, action in binds.items() for arg in ("--bind", f"{key}:{action}")),
         "--preview-window", "right:55%",
@@ -402,7 +474,9 @@ def choose() -> str | None:
     os.environ["REX_PICKER_STATE"] = tempfile.mkdtemp()
     try:
         load_servers()
-        return fzf(set_mode(start_mode()))
+        remotes = cached_remotes()
+        set_remotes(remotes)
+        return fzf(set_mode(start_mode()), remotes)
     finally:
         shutil.rmtree(env("REX_PICKER_STATE"))
 
@@ -452,10 +526,12 @@ def main(argv: list[str]) -> None:
         print(set_mode(home()))
     elif command == "next-server":
         print(next_server())
-    elif command == "probe-remotes":
-        probe_remotes()
+    elif command == "refresh-remotes":
+        refresh_remotes()
     elif command == "current":
         current()
+    elif command == "fresh":
+        current(fresh=True)
     elif command == "pin":
         pin(a[0], a[1], a[2], a[3])
     elif command == "move-pin":

@@ -162,6 +162,13 @@ you're in a session on another server, the picker opens in a session
 of its own here (`rex-sessions picker`), which it closes when done.
 Cancelling it returns to the session you were in.
 
+Each call to a remote server opens a new connection, which can take a
+second over a long link. So the picker shows a remote's sessions from
+its last list (`$XDG_CACHE_HOME/rex-sessions/`, or
+`~/.cache/rex-sessions/`), fetches every remote's in the background,
+and updates the list when they arrive. `alt-r` offers the remotes with
+a cached list straight away, then those that answer.
+
 - To browse a server with `alt-r`, set this package up in that server's
   config too, with `repos` pointing at that machine's repos. The picker
   asks each server's own config for its repos, pins, and sessions.
