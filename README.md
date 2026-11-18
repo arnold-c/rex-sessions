@@ -118,9 +118,14 @@ require("rex_sessions").setup({
 	-- the module's path by default.
 	root = nil,
 	-- This machine's `rex` CLI, which opens the picker in a session of
-	-- its own when you're in a session on another server. Defaults to
-	-- $REX_BIN_DIR/rex, or `rex` on the server's PATH.
-	rex_cli = nil,
+	-- its own when you're in a session on another server: the first that
+	-- exists, as the CLI or the directory holding it (`echo $REX_BIN_DIR`
+	-- in a Rex terminal), with `~` and `$NAME` expanded. Falls back to
+	-- `rex` on the server's PATH.
+	rex_cli = {
+		"$REX_BIN_DIR",
+		"~/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
+	},
 })
 ```
 

@@ -79,9 +79,14 @@ M.defaults = {
 	},
 	-- This package's directory: absolute, or relative to $HOME.
 	root = default_root(),
-	-- The `rex` CLI on this machine, which opens the picker in a session
-	-- of its own when you're in a session on another server.
-	rex_cli = os.getenv("REX_BIN_DIR") and os.getenv("REX_BIN_DIR") .. "/rex" or "rex",
+	-- This machine's `rex` CLI, which opens the picker in a session of its
+	-- own when you're in a session on another server: the first that
+	-- exists, as the CLI or the directory holding it, with `~` and `$NAME`
+	-- expanded. Falls back to `rex` on the server's PATH.
+	rex_cli = {
+		"$REX_BIN_DIR",
+		"~/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
+	},
 }
 
 local options = M.defaults
@@ -246,6 +251,21 @@ end
 -- The label of a picker's own session, which the picker hides.
 local PICKER_LABEL = "rex-sessions picker"
 
+-- This machine's rex CLI: the first of options.rex_cli that is the CLI
+-- or a directory holding it, or `rex` on the server's PATH.
+local function rex_cli()
+	for _, candidate in ipairs(util.list(options.rex_cli)) do
+		local path = util.expand(candidate)
+		if path ~= "" and util.test("-d", path) then
+			path = path .. "/rex"
+		end
+		if path ~= "" and util.test("-x", path) then
+			return path
+		end
+	end
+	return "rex"
+end
+
 -- In a session on another server, a layer would run the picker there,
 -- where this machine's sessions can't be listed and every key crosses
 -- the network. So run it in a session of its own on this machine, and
@@ -256,14 +276,15 @@ local PICKER_LABEL = "rex-sessions picker"
 local function open_picker_session(ctx)
 	local start = options.start_server == "home" and "local" or "remote:" .. ctx.server
 	local back = { server = ctx.server, session_id = ctx.session_id }
-	local argv = { options.rex_cli, "new", "--shell", "none", PICKER_LABEL, "--" }
+	local cli = rex_cli()
+	local argv = { cli, "new", "--shell", "none", PICKER_LABEL, "--" }
 	for _, arg in ipairs(picker_command(nil, ctx.client_id, start, back)) do
 		table.insert(argv, arg)
 	end
 	local created, err = rex.exec(argv)
 	local session_id = created and created.ok and created.stdout:match("session:%S+")
 	if not session_id then
-		error("couldn't open the picker with " .. options.rex_cli .. " (see rex_cli): " .. (err or created.stderr), 0)
+		error("couldn't open the picker with " .. cli .. " (see rex_cli): " .. (err or created.stderr), 0)
 	end
 	client.select(ctx, nil, { session_id = session_id })
 end
