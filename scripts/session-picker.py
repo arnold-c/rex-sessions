@@ -362,14 +362,19 @@ def fzf(first_prompt: str) -> str | None:
     return chosen.stdout.rstrip("\n") if chosen.returncode == 0 else None
 
 
-def pick() -> bool:
+def choose() -> str | None:
+    """The row chosen in fzf, or None if it was cancelled."""
     # State shared with the commands fzf runs, such as the mode.
     os.environ["REX_PICKER_STATE"] = tempfile.mkdtemp()
     try:
         load_servers()
-        choice = fzf(set_mode(start_mode()))
+        return fzf(set_mode(start_mode()))
     finally:
         shutil.rmtree(env("REX_PICKER_STATE"))
+
+
+def pick() -> bool:
+    choice = choose()
     if choice is None:
         return True
     srv, _, label, dir, id = (choice.split("\t") + [""] * 5)[:5]

@@ -209,24 +209,29 @@ shift 6
 exec "$shell" -i -c 'exec python3 "$0" "$@"' "$picker" "$@"
 ]]
 
--- Runs session-picker.py with these arguments. The picker's layer
--- becomes the focused block, so pass the pane it opened over for
--- previewing the current session.
-local function open_session_picker(ctx, ...)
-	local picker = options.root .. "/scripts/session-picker.py"
-	open_layer(ctx, {
+-- The command that runs session-picker.py with these arguments (see
+-- PICKER_SH for the others).
+local function picker_command(origin_block, client_id, start, ...)
+	return {
 		"/bin/sh",
 		"-c",
 		PICKER_SH,
 		"sh",
-		ctx.block_id or "",
-		ctx.client_id or "",
-		picker,
+		origin_block or "",
+		client_id or "",
+		options.root .. "/scripts/session-picker.py",
 		options.shell or "",
 		table.concat(util.list(options.preview), "\n"),
-		options.start_server,
+		start,
 		...,
-	})
+	}
+end
+
+-- Runs session-picker.py with these arguments in a layer over the
+-- current window. The picker's layer becomes the focused block, so pass
+-- the pane it opened over for previewing the current session.
+local function open_session_picker(ctx, ...)
+	open_layer(ctx, picker_command(ctx.block_id, ctx.client_id, options.start_server, ...))
 end
 
 -- The first of options.repos that exists on this server.
